@@ -37,6 +37,61 @@ app.post('/run-cypher', async (req, res) => {
     }
 });
 
+app.get('/project-components-graph', async (req, res) => {
+  const session = driver.session();
+  try {
+    // Run the Cypher query just to create the graph projection
+    await session.run(`
+      CALL gds.graph.project(
+        'componentsGraph',
+        'Candidate',
+        {
+          PARTICIPATED_TOGETHER: {
+            type: 'PARTICIPATED_TOGETHER',
+            orientation: 'UNDIRECTED'
+          }
+        }
+      )
+    `);
+
+    // Respond that the graph projection was successful
+    res.status(200).send({ message: 'Graph projection created successfully' });
+  } catch (error) {
+    console.error('Error projecting the graph:', error);
+    res.status(500).json({ error: 'An error occurred while projecting the graph' });
+  } finally {
+    await session.close();
+  }
+});
+
+app.get('/wcc-components', async (req, res) => {
+  const session = driver.session();
+  try {
+    // Execute the Cypher query to retrieve weakly connected components
+    const result = await session.run(`
+      CALL gds.wcc.stream('componentsGraph')
+      YIELD nodeId, componentId
+      RETURN gds.util.asNode(nodeId).name AS Candidate, componentId
+      ORDER BY componentId
+      LIMIT 10
+    `);
+
+    // Extract data into an array of objects
+    const wccComponents = result.records.map(record => ({
+      Candidate: record.get('Candidate'),
+      ComponentId: record.get('componentId').toNumber()
+    }));
+
+    // Send the results back as a JSON response
+    res.json(wccComponents);
+  } catch (error) {
+    console.error('Error executing WCC query:', error);
+    res.status(500).json({ error: 'An error occurred while executing the WCC query' });
+  } finally {
+    await session.close();
+  }
+});
+
 app.get('/candidate-predictions', async (req, res) => {
   const session = driver.session();
 
@@ -145,6 +200,74 @@ app.post('/dropprojection', async (req, res) => {
 }
 );
 
+
+app.get('/node-count', async (req, res) => {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      'MATCH (n) RETURN labels(n) AS NodeType, count(n) AS TotalCount'
+    );
+    const nodeCount = result.records.map(record => ({
+      NodeType: record.get('NodeType'),
+      TotalCount: record.get('TotalCount').toNumber()
+    }));
+    res.json(nodeCount);
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ error: 'An error occurred while executing the query' });
+  } finally {
+    await session.close();
+  }
+});
+
+
+app.get('/total-nodes', async (req, res) => {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      'MATCH (n) RETURN count(n) AS TotalNodes'
+    );
+    const totalNodes = result.records[0].get('TotalNodes').toNumber();
+    res.json({ totalNodes });
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ error: 'An error occurred while executing the query' });
+  } finally {
+    await session.close();
+  }
+});
+
+app.get('/total-relationships', async (req, res) => {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      'MATCH ()-[r]->() RETURN count(r) AS TotalRelationships'
+    );
+    const totalRelationships = result.records[0].get('TotalRelationships').toNumber();
+    res.json({ totalRelationships });
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ error: 'An error occurred while executing the query' });
+  } finally {
+    await session.close();
+  }
+});
+
+app.get('/isolated-nodes', async (req, res) => {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      'MATCH (n) WHERE NOT (n)--() RETURN count(n) AS IsolatedNodes'
+    );
+    const isolatedNodes = result.records[0].get('IsolatedNodes').toNumber();
+    res.json({ isolatedNodes });
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ error: 'An error occurred while executing the query' });
+  } finally {
+    await session.close();
+  }
+});
 
 const PORT = 4000;
 app.listen(PORT, () => {
